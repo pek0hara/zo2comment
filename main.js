@@ -2,12 +2,11 @@
  * NotionからのWebhookを受信する関数
  */
 function doPost(e) {
-  try {
-    // 情報ログを記録
-    writeLog('Webhook受信を開始しました', 'info');
-    
+  try {    
     // リクエストボディを解析
     const requestBody = JSON.parse(e.postData.contents);
+
+    writeLog('content: ' + JSON.stringify(requestBody, null, 2));
     
     // Notionからのデータを取得
     const pageId = extractPageId(requestBody); // ページIDを抽出
@@ -15,7 +14,7 @@ function doPost(e) {
     const content = extractContent(requestBody);
     
     if (!pageId) {
-      writeLog('ページIDが見つかりません', 'warning');
+      writeLog('ページIDが見つかりません');
       return ContentService.createTextOutput(JSON.stringify({
         status: 'error',
         message: 'ページIDが見つかりません'
@@ -23,7 +22,7 @@ function doPost(e) {
     }
     
     if (!title || !content) {
-      writeLog('タイトルまたは本文が見つかりません', 'warning');
+      writeLog('タイトルまたは本文が見つかりません');
       return ContentService.createTextOutput(JSON.stringify({
         status: 'error',
         message: 'タイトルまたは本文が見つかりません'
@@ -39,9 +38,6 @@ function doPost(e) {
     console.log('生成されたコメント:', comment);
     console.log('コメントがNotionページに投稿されました:', pageId);
     
-    // 成功ログを記録
-    writeLog(`コメントが正常に投稿されました。ページID: ${pageId}`, 'info');
-    
     return ContentService.createTextOutput(JSON.stringify({
       status: 'success',
       comment: comment,
@@ -52,7 +48,7 @@ function doPost(e) {
     console.error('エラーが発生しました:', error);
     
     // エラーログを記録
-    writeLog(error.message, 'error', error);
+    writeLog(`エラーが発生しました: ${error.message}`);
     
     return ContentService.createTextOutput(JSON.stringify({
       status: 'error',
@@ -283,8 +279,8 @@ function isLoggingEnabled() {
   return enabled === 'true';
 }
 
-// ログを書き出す関数（エラー、情報、デバッグなど汎用的に使用可能）
-function writeLog(message, level = 'info', error = null) {
+// ログを書き出す関数（文字列ログを記録）
+function writeLog(log) {
   // ログ書き出しが有効かチェック
   if (!isLoggingEnabled()) {
     console.log('ログ書き出しが無効のため、スキップします');
@@ -293,14 +289,8 @@ function writeLog(message, level = 'info', error = null) {
 
   const scriptProperties = PropertiesService.getScriptProperties();
   const timestamp = new Date().toISOString();
-  const logKey = `log_${level}_${timestamp}`;
-  
-  let logValue = `Level: ${level}\nMessage: ${message}\nTimestamp: ${timestamp}`;
-  
-  // エラーオブジェクトが渡された場合、スタックトレースも含める
-  if (error && error.stack) {
-    logValue += `\nStack: ${error.stack}`;
-  }
+  const logKey = `log_${timestamp}`;
+  const logValue = `${log}\nTimestamp: ${timestamp}`;
   
   scriptProperties.setProperty(logKey, logValue);
   console.log(`ログを保存しました: ${logKey}`);
@@ -314,7 +304,7 @@ function myFunctionWithConditionalLogging() {
     console.log(data.length); // ここでエラーが発生します
   } catch (e) {
     // 設定に基づいてエラーログを書き出し
-    writeLog(e.message, 'error', e);
+    writeLog(`エラーが発生しました: ${e.message}`);
     
     // 必要に応じてエラーを再スローするか、他の処理を行う
     console.error('エラーが発生しました:', e.message);
@@ -322,19 +312,13 @@ function myFunctionWithConditionalLogging() {
 }
 
 // 保存されたログを表示する関数
-function showLogs(level = null) {
+function showLogs() {
   const scriptProperties = PropertiesService.getScriptProperties();
   const keys = scriptProperties.getKeys();
-  let logKeys = keys.filter(key => key.startsWith("log_"));
-  
-  // 特定のレベルのログのみを表示する場合
-  if (level) {
-    logKeys = logKeys.filter(key => key.includes(`log_${level}_`));
-  }
+  const logKeys = keys.filter(key => key.startsWith("log_"));
   
   if (logKeys.length === 0) {
-    const levelText = level ? `${level}レベルの` : '';
-    console.log(`保存された${levelText}ログはありません`);
+    console.log('保存されたログはありません');
     return;
   }
   
@@ -345,31 +329,25 @@ function showLogs(level = null) {
 
 // エラーログのみを表示する関数（後方互換性のため）
 function showErrorLogs() {
-  showLogs('error');
+  showLogs();
 }
 
 // ログをクリアする関数
-function clearLogs(level = null) {
+function clearLogs() {
   const scriptProperties = PropertiesService.getScriptProperties();
   const keys = scriptProperties.getKeys();
-  let logKeys = keys.filter(key => key.startsWith("log_"));
-  
-  // 特定のレベルのログのみをクリアする場合
-  if (level) {
-    logKeys = logKeys.filter(key => key.includes(`log_${level}_`));
-  }
+  const logKeys = keys.filter(key => key.startsWith("log_"));
   
   logKeys.forEach(key => {
     scriptProperties.deleteProperty(key);
   });
   
-  const levelText = level ? `${level}レベルの` : '';
-  console.log(`${logKeys.length}件の${levelText}ログをクリアしました`);
+  console.log(`${logKeys.length}件のログをクリアしました`);
 }
 
 // エラーログのみをクリアする関数（後方互換性のため）
 function clearErrorLogs() {
-  clearLogs('error');
+  clearLogs();
 }
 
 /**
