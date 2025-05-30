@@ -1,8 +1,9 @@
 /**
  * NotionからのWebhookを受信する関数
  */
+
 function doPost(e) {
-  try {    
+  try {
     // リクエストボディを解析
     const requestBody = JSON.parse(e.postData.contents);
 
@@ -62,27 +63,12 @@ function doPost(e) {
  */
 function extractPageId(requestBody) {
   try {
-    // Notionのwebhook構造に応じて調整が必要
-    // 通常、イベントが発生したページやデータベースのIDが含まれます
+    // ページIDの抽出ロジック
     if (requestBody.data && requestBody.data.id) {
       return requestBody.data.id;
     }
-    // Webhookのペイロードによっては 'page_id' や 'parent.page_id' などで取得できる場合があります
-    if (requestBody.page_id) {
-      return requestBody.page_id;
-    }
-    if (requestBody.parent && requestBody.parent.type === 'page_id') {
-        return requestBody.parent.page_id;
-    }
-    // Notion APIのイベントタイプによって構造が異なるため、
-    // 実際のWebhookペイロードを確認して調整してください。
-    // 例: ページ更新イベントの場合
-    if (requestBody.type === 'page.updated' && requestBody.page && requestBody.page.id) {
-        return requestBody.page.id;
-    }
 
-
-    console.warn('ページIDの抽出に失敗しました。Webhookのペイロードを確認してください:', requestBody);
+    console.warn('ページIDの抽出に失敗しました。Webhookのペイロードを確認してください:', JSON.stringify(requestBody, null, 2));
     return null;
   } catch (error) {
     console.error('ページID抽出エラー:', error);
@@ -96,21 +82,19 @@ function extractPageId(requestBody) {
 function extractTitle(requestBody) {
   try {
     // Notionのwebhook構造に応じて調整が必要
+    // 提供されたJSONの例では、data.properties 内の type: 'title' のプロパティから抽出
     if (requestBody.data && requestBody.data.properties) {
       // ページのタイトルプロパティを探す
       const titleProperty = Object.values(requestBody.data.properties)
         .find(prop => prop.type === 'title');
       
       if (titleProperty && titleProperty.title && titleProperty.title.length > 0) {
-        return titleProperty.title[0].plain_text;
+        // titleプロパティの最初の要素のplain_textを使用
+        return titleProperty.title[0].plain_text; 
       }
     }
     
-    // 別の構造の場合
-    if (requestBody.title) {
-      return requestBody.title;
-    }
-    
+    console.warn('タイトルが見つかりませんでした。Webhookのペイロードを確認してください:', JSON.stringify(requestBody, null, 2));
     return null;
   } catch (error) {
     console.error('タイトル抽出エラー:', error);
@@ -123,27 +107,64 @@ function extractTitle(requestBody) {
  */
 function extractContent(requestBody) {
   try {
-    // Notionのブロックから本文を抽出
-    if (requestBody.data && requestBody.data.children) {
-      let content = '';
-      requestBody.data.children.forEach(block => {
+    const pageId = extractPageId(requestBody);
+    if (!pageId) {
+      console.warn('ページIDが見つからないため、本文を抽出できません。');
+      return null;
+    }
+
+    const NOTION_TOKEN = PropertiesService.getScriptProperties().getProperty('NOTION_TOKEN');
+    const NOTION_VERSION = '2022-06-28'; // Notion APIのバージョン
+
+    if (!NOTION_TOKEN) {
+      throw new Error('Notion API トークンが設定されていません');
+    }
+
+    const url = `https://api.notion.com/v1/blocks/${pageId}/children`;
+    const options = {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${NOTION_TOKEN}`,
+        'Notion-Version': NOTION_VERSION,
+        'Content-Type': 'application/json',
+      },
+      muteHttpExceptions: true
+    };
+
+    const response = UrlFetchApp.fetch(url, options);
+    const responseCode = response.getResponseCode();
+    const responseBody = response.getContentText();
+
+    if (responseCode !== 200) {
+      console.error(`Notion API エラー (ブロック取得 - コード: ${responseCode}):`, responseBody);
+      throw new Error(`ページの本文取得に失敗しました。ステータスコード: ${responseCode}, レスポンス: ${responseBody}`);
+    }
+
+    const data = JSON.parse(responseBody);
+    let content = '';
+
+    if (data.results && data.results.length > 0) {
+      data.results.forEach(block => {
         if (block.type === 'paragraph' && block.paragraph && block.paragraph.rich_text) {
-          block.paragraph.rich_text.forEach(text => {
-            content += text.plain_text || '';
+          block.paragraph.rich_text.forEach(textItem => {
+            if (textItem.type === 'text') {
+              content += textItem.text.content + '\\n';
+            }
           });
         }
       });
-      return content;
     }
-    
-    // 別の構造の場合
-    if (requestBody.content) {
-      return requestBody.content;
+
+    if (content.trim() === '') {
+      console.warn('ページから本文コンテンツが見つかりませんでした。ページID:', pageId, 'APIレスポンス:', JSON.stringify(data, null, 2));
+      return null;
     }
-    
-    return null;
+
+    return content.trim();
   } catch (error) {
     console.error('本文抽出エラー:', error);
+    // エラーログを記録
+    writeLog(`本文抽出エラー: ${error.message} - pageId: ${extractPageId(requestBody)}`);
     return null;
   }
 }
@@ -290,7 +311,7 @@ function writeLog(log) {
   const scriptProperties = PropertiesService.getScriptProperties();
   const timestamp = new Date().toISOString();
   const logKey = `log_${timestamp}`;
-  const logValue = `${log}\nTimestamp: ${timestamp}`;
+  const logValue = `${log}`;
   
   scriptProperties.setProperty(logKey, logValue);
   console.log(`ログを保存しました: ${logKey}`);
